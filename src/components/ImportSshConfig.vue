@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { ElMessage } from 'element-plus'
-import type { ImportedServer, SshServer } from '../types'
+import type { ImportedServer, SshServer, JumpEntry } from '../types'
 
 defineProps<{
   modelValue: boolean
@@ -44,14 +44,29 @@ function handleClose() {
 
 function handleImport() {
   const selected = importedList.value.filter((s) => selectedNames.value.includes(s.name))
-  const servers: Omit<SshServer, 'id'>[] = selected.map((s) => ({
-    name: s.name,
-    host: s.host,
-    port: s.port,
-    username: s.username ?? '',
-    authType: s.identityFile ? 'privateKey' : 'password',
-    privateKeyPath: s.identityFile,
-  }))
+  const servers: Omit<SshServer, 'id'>[] = selected.map((s) => {
+    // 将 proxyJump 转换为 jumpEntries（inline 类型）
+    const jumpEntries: JumpEntry[] = (s.proxyJump ?? []).map((j) => ({
+      type: 'inline' as const,
+      inline: {
+        host: j.host,
+        port: j.port,
+        username: j.username ?? '',
+        authType: j.identityFile ? 'privateKey' as const : 'password' as const,
+        privateKeyPath: j.identityFile,
+      },
+    }))
+
+    return {
+      name: s.name,
+      host: s.host,
+      port: s.port,
+      username: s.username ?? '',
+      authType: s.identityFile ? 'privateKey' : 'password',
+      privateKeyPath: s.identityFile,
+      jumpEntries: jumpEntries.length > 0 ? jumpEntries : undefined,
+    }
+  })
   emit('import', servers)
   emit('update:modelValue', false)
 }
@@ -96,6 +111,23 @@ function handleImport() {
                 <el-tag size="small" :type="row.identityFile ? 'success' : 'info'" effect="plain">
                   {{ row.identityFile ? '私钥' : '密码' }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="跳板机" min-width="120">
+              <template #default="{ row }">
+                <template v-if="row.proxyJump && row.proxyJump.length > 0">
+                  <el-tag
+                    v-for="(j, i) in row.proxyJump"
+                    :key="i"
+                    size="small"
+                    type="warning"
+                    effect="plain"
+                    style="margin-right: 4px"
+                  >
+                    {{ j.host }}:{{ j.port }}
+                  </el-tag>
+                </template>
+                <span v-else>-</span>
               </template>
             </el-table-column>
           </el-table>

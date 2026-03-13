@@ -217,7 +217,8 @@ async fn authenticate_jump(
     Ok(())
 }
 
-/// 通过 SSH Agent 认证
+/// 通过 SSH Agent 认证（Unix：使用 Unix Domain Socket 连接 ssh-agent）
+#[cfg(unix)]
 async fn authenticate_with_agent(session: &mut Handle<SshClient>, username: &str) -> Result<bool> {
     let agent_socket = std::env::var("SSH_AUTH_SOCK")
         .map_err(|_| anyhow!("SSH_AUTH_SOCK 未设置，请确认 ssh-agent 正在运行"))?;
@@ -225,6 +226,28 @@ async fn authenticate_with_agent(session: &mut Handle<SshClient>, username: &str
     let mut agent = russh_keys::agent::client::AgentClient::connect_uds(&agent_socket)
         .await
         .context("无法连接到 ssh-agent")?;
+
+    let identities = agent
+        .request_identities()
+        .await
+        .context("无法从 ssh-agent 获取密钥列表")?;
+
+    for key in identities {
+        let result = session
+            .authenticate_publickey_with(username, key, &mut agent)
+            .await;
+        if let Ok(true) = result {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+/// 通过 SSH Agent 认证（Windows：使用 Pageant 连接 PuTTY SSH Agent）
+#[cfg(windows)]
+async fn authenticate_with_agent(session: &mut Handle<SshClient>, username: &str) -> Result<bool> {
+    let mut agent = russh_keys::agent::client::AgentClient::connect_pageant().await;
 
     let identities = agent
         .request_identities()
