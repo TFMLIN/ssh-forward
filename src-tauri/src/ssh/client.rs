@@ -219,12 +219,21 @@ async fn authenticate_jump(
 
 /// 通过 SSH Agent 认证
 async fn authenticate_with_agent(session: &mut Handle<SshClient>, username: &str) -> Result<bool> {
-    let agent_socket = std::env::var("SSH_AUTH_SOCK")
-        .map_err(|_| anyhow!("SSH_AUTH_SOCK 未设置，请确认 ssh-agent 正在运行"))?;
+    #[cfg(unix)]
+    let mut agent = {
+        let agent_socket = std::env::var("SSH_AUTH_SOCK")
+            .map_err(|_| anyhow!("SSH_AUTH_SOCK 未设置，请确认 ssh-agent 正在运行"))?;
+        russh_keys::agent::client::AgentClient::connect_uds(&agent_socket)
+            .await
+            .context("无法连接到 ssh-agent")?
+    };
 
-    let mut agent = russh_keys::agent::client::AgentClient::connect_uds(&agent_socket)
-        .await
-        .context("无法连接到 ssh-agent")?;
+    #[cfg(windows)]
+    let mut agent = {
+        // Windows 上尝试连接 Pageant (PuTTY SSH Agent)
+        // 也可以支持 OpenSSH 的命名管道实现
+        russh_keys::agent::client::AgentClient::connect_pageant()
+    };
 
     let identities = agent
         .request_identities()
