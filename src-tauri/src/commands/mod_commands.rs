@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::ssh::client::connect;
 use crate::ssh::forwarder::start_forward;
-use crate::types::{ForwardRule, ImportedServer, SshServerConfig};
+use crate::types::{ForwardRule, ImportedJumpHost, ImportedServer, SshServerConfig};
 
 /// 单个转发会话的运行时数据
 pub struct ForwardSession {
@@ -106,6 +106,104 @@ pub async fn get_all_statuses(
     Ok(statuses)
 }
 
+/// 解析 ProxyJump 值中的单个跳板机（格式: [user@]host[:port]）
+fn parse_jump_destination(dest: &str) -> (String, u16, Option<String>) {
+    let dest = dest.trim();
+    let (user, host_port) = if let Some(at_pos) = dest.find('@') {
+        (Some(dest[..at_pos].to_string()), &dest[at_pos + 1..])
+    } else {
+        (None, dest)
+    };
+
+    // 处理 [IPv6]:port 格式
+    let (host, port) = if host_port.starts_with('[') {
+        if let Some(bracket_end) = host_port.find(']') {
+            let h = &host_port[1..bracket_end];
+            let rest = &host_port[bracket_end + 1..];
+            if let Some(port_str) = rest.strip_prefix(':') {
+                (h.to_string(), port_str.parse::<u16>().unwrap_or(22))
+            } else {
+                (h.to_string(), 22)
+            }
+        } else {
+            (host_port.to_string(), 22)
+        }
+    } else if let Some(colon_pos) = host_port.rfind(':') {
+        let h = &host_port[..colon_pos];
+        let p = host_port[colon_pos + 1..].parse::<u16>().unwrap_or(22);
+        (h.to_string(), p)
+    } else {
+        (host_port.to_string(), 22)
+    };
+
+    (host, port, user)
+}
+
+/// 将 ProxyJump 值中引用的 alias 递归解析为 ImportedJumpHost 列表。
+/// 支持逗号分隔的多级跳板机和对其他 Host 别名的引用。
+fn resolve_proxy_jump(
+    proxy_jump_value: &str,
+    ssh_config: &ssh2_config::SshConfig,
+    proxy_jump_map: &std::collections::HashMap<String, String>,
+    depth: usize,
+) -> Vec<ImportedJumpHost> {
+    if depth > 10 {
+        return vec![]; // 防止无限递归
+    }
+
+    let mut result = Vec::new();
+
+    for dest in proxy_jump_value.split(',') {
+        let dest = dest.trim();
+        if dest.is_empty() || dest.eq_ignore_ascii_case("none") {
+            continue;
+        }
+
+        // 检查是否为已知 Host 别名（不含 @ 和 : 的纯名称）
+        let is_alias = !dest.contains('@') && !dest.contains(':');
+
+        if is_alias {
+            // 先递归解析该别名自己的 ProxyJump
+            if let Some(nested_pj) = proxy_jump_map.get(dest) {
+                let nested = resolve_proxy_jump(nested_pj, ssh_config, proxy_jump_map, depth + 1);
+                result.extend(nested);
+            }
+
+            // 用 ssh_config.query 获取该别名的真实参数
+            let params = ssh_config.query(dest);
+            let hostname = params
+                .host_name
+                .clone()
+                .unwrap_or_else(|| dest.to_string());
+            let port = params.port.unwrap_or(22);
+            let username = params.user.clone();
+            let identity_file = params
+                .identity_file
+                .as_ref()
+                .and_then(|files| files.first())
+                .map(|p| p.to_string_lossy().to_string());
+
+            result.push(ImportedJumpHost {
+                host: hostname,
+                port,
+                username,
+                identity_file,
+            });
+        } else {
+            // 直接解析 [user@]host[:port] 格式
+            let (host, port, user) = parse_jump_destination(dest);
+            result.push(ImportedJumpHost {
+                host,
+                port,
+                username: user,
+                identity_file: None,
+            });
+        }
+    }
+
+    result
+}
+
 /// 导入 ~/.ssh/config 文件，返回主机列表
 #[tauri::command]
 pub async fn import_ssh_config() -> Result<Vec<ImportedServer>, String> {
@@ -121,12 +219,34 @@ pub async fn import_ssh_config() -> Result<Vec<ImportedServer>, String> {
     let mut reader = std::io::BufReader::new(file);
 
     let ssh_config = ssh2_config::SshConfig::default()
-        .parse(&mut reader, ssh2_config::ParseRule::STRICT)
+        .parse(
+            &mut reader,
+            ssh2_config::ParseRule::ALLOW_UNSUPPORTED_FIELDS,
+        )
         .map_err(|e| format!("Failed to parse ssh config: {}", e))?;
 
+    // 第一遍：收集所有 Host 别名及其 ProxyJump 值
+    let mut proxy_jump_map = std::collections::HashMap::new();
+    for host in ssh_config.get_hosts() {
+        let host_name_clause = host.pattern.iter().find(|p| {
+            p.pattern != "*" && !p.pattern.is_empty() && !p.negated
+        });
+
+        if let Some(pattern) = host_name_clause {
+            let alias = pattern.pattern.clone();
+            let params = ssh_config.query(&alias);
+
+            if let Some(args) = params.unsupported_fields.get("proxyjump") {
+                if let Some(value) = args.first() {
+                    proxy_jump_map.insert(alias.clone(), value.clone());
+                }
+            }
+        }
+    }
+
+    // 第二遍：构建导入列表
     let mut servers = Vec::new();
     for host in ssh_config.get_hosts() {
-        // 跳过通配符主机（Host *）
         let host_name_clause = host.pattern.iter().find(|p| {
             p.pattern != "*" && !p.pattern.is_empty() && !p.negated
         });
@@ -148,12 +268,18 @@ pub async fn import_ssh_config() -> Result<Vec<ImportedServer>, String> {
                 .and_then(|files| files.first())
                 .map(|p| p.to_string_lossy().to_string());
 
+            // 解析 ProxyJump
+            let proxy_jump = proxy_jump_map.get(&alias).map(|pj_value| {
+                resolve_proxy_jump(pj_value, &ssh_config, &proxy_jump_map, 0)
+            });
+
             servers.push(ImportedServer {
                 name: alias,
                 host: hostname,
                 port,
                 username,
                 identity_file,
+                proxy_jump,
             });
         }
     }

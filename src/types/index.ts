@@ -55,6 +55,14 @@ export interface ForwardSession {
   startedAt: Date
 }
 
+/** 从 ~/.ssh/config 导入的跳板机信息 */
+export interface ImportedJumpHost {
+  host: string
+  port: number
+  username?: string
+  identityFile?: string
+}
+
 /** 从 ~/.ssh/config 导入的主机信息 */
 export interface ImportedServer {
   name: string
@@ -62,4 +70,6 @@ export interface ImportedServer {
   port: number
   username?: string
   identityFile?: string
+  /** ProxyJump 解析出的跳板机链 */
+  proxyJump?: ImportedJumpHost[]
 }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Delete, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Delete, ArrowUp, ArrowDown, FolderOpened } from '@element-plus/icons-vue'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useServerStore } from '../stores/servers'
 import type { SshServer, JumpEntry, JumpHost } from '../types'
 
@@ -112,6 +113,26 @@ function onEntryTypeChange(entry: JumpEntry) {
   }
 }
 
+// --- 选择私钥文件 ---
+
+async function selectPrivateKey(target: 'main' | number) {
+  const selected = await open({
+    title: '选择私钥文件',
+    multiple: false,
+    directory: false,
+  })
+  if (selected) {
+    if (target === 'main') {
+      form.value.privateKeyPath = selected as string
+    } else {
+      const entry = form.value.jumpEntries?.[target]
+      if (entry?.inline) {
+        entry.inline.privateKeyPath = selected as string
+      }
+    }
+  }
+}
+
 // --- 保存 ---
 
 function handleClose() {
@@ -187,7 +208,11 @@ function handleSave() {
 
         <template v-if="form.authType === 'privateKey'">
           <el-form-item label="私钥路径">
-            <el-input v-model="form.privateKeyPath" placeholder="如：~/.ssh/id_rsa" />
+            <el-input v-model="form.privateKeyPath" placeholder="如：~/.ssh/id_rsa">
+              <template #append>
+                <el-button :icon="FolderOpened" @click="selectPrivateKey('main')" />
+              </template>
+            </el-input>
           </el-form-item>
           <el-form-item label="私钥密码">
             <el-input v-model="form.passphrase" type="password" show-password placeholder="私钥密码（如有）" />
@@ -293,7 +318,11 @@ function handleSave() {
               </template>
               <template v-if="getInline(entry).authType === 'privateKey'">
                 <el-form-item label="私钥路径">
-                  <el-input v-model="getInline(entry).privateKeyPath" placeholder="如：~/.ssh/id_rsa" />
+                  <el-input v-model="getInline(entry).privateKeyPath" placeholder="如：~/.ssh/id_rsa">
+                    <template #append>
+                      <el-button :icon="FolderOpened" @click="selectPrivateKey(idx)" />
+                    </template>
+                  </el-input>
                 </el-form-item>
                 <el-form-item label="私钥密码">
                   <el-input v-model="getInline(entry).passphrase" type="password" show-password placeholder="私钥密码（如有）" />

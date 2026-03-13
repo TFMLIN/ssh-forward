@@ -52,6 +52,16 @@ pub struct ForwardRule {
     pub description: Option<String>,
 }
 
+/// 从 ~/.ssh/config 导入的跳板机信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedJumpHost {
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub identity_file: Option<String>,
+}
+
 /// 从 ~/.ssh/config 导入的服务器信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,4 +71,6 @@ pub struct ImportedServer {
     pub port: u16,
     pub username: Option<String>,
     pub identity_file: Option<String>,
+    /// ProxyJump 解析出的跳板机链
+    pub proxy_jump: Option<Vec<ImportedJumpHost>>,
 }
