@@ -1,0 +1,18 @@
+[build]
+# 使用所有 CPU 核心进行编译
+jobs = -1
+
+[profile.dev]
+# 开发模式下减少优化，加快编译
+opt-level = 0
+
+[profile.release]
+# 使用多线程进行代码生成
+codegen-units = 16
+# 禁用 LTO 可大幅加快链接速度（牺牲少量性能）
+lto = false
+
+# Windows 下使用更快的链接器（如果安装了 lld）
+# [target.x86_64-pc-windows-msvc]
+# linker = "lld-link"
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]

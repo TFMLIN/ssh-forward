@@ -204,10 +204,16 @@ fn resolve_proxy_jump(
     result
 }
 
-/// 导入 ~/.ssh/config 文件，返回主机列表
+/// 导入 SSH config 文件，返回主机列表
+/// Windows: %USERPROFILE%\.ssh\config
+/// Unix: ~/.ssh/config
 #[tauri::command]
 pub async fn import_ssh_config() -> Result<Vec<ImportedServer>, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+    
+    // Windows 和 Unix 都使用 .ssh/config 路径
+    // Windows: C:\Users\<username>\.ssh\config
+    // Unix: /home/<username>/.ssh/config
     let config_path = home.join(".ssh").join("config");
 
     if !config_path.exists() {

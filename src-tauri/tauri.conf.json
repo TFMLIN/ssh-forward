@@ -5,7 +5,7 @@
   "identifier": "com.ssh.forward",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -17,11 +17,20 @@
         "height": 620,
         "minWidth": 700,
         "minHeight": 500,
-        "resizable": true
+        "resizable": true,
+        "visible": true
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": ["$APPDATA/**", "$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**"],
+        "deny": []
+      }
     }
   },
   "bundle": {
