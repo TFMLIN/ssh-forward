@@ -1,133 +1,152 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
+import { open, save } from '@tauri-apps/plugin-dialog'
+import { Upload, Download, FolderOpen } from 'lucide-vue-next'
 import { useServerStore } from './stores/servers'
+import { getToast } from './utils/toast'
+import { importConfigFromPath, exportConfigToPath, type ConfigData } from './utils/config'
 import ServerList from './components/ServerList.vue'
 import ForwardList from './components/ForwardList.vue'
 import ImportSshConfig from './components/ImportSshConfig.vue'
+import ImportConfigDialog from './components/ImportConfigDialog.vue'
+import Toast from './components/Toast.vue'
 import type { SshServer } from './types'
 
 const store = useServerStore()
+const toast = getToast()
 
 const selectedServer = computed(() => store.getSelectedServer())
-const showImport = ref(false)
+const showSshImport = ref(false)
+const showConfigImport = ref(false)
+const pendingConfigData = ref<ConfigData | null>(null)
 
-function handleImport(servers: Omit<SshServer, 'id'>[]) {
+// 导入 SSH config
+function handleSshImport(servers: Omit<SshServer, 'id'>[]) {
   let count = 0
   for (const s of servers) {
     store.addServer(s)
     count++
   }
-  ElMessage.success(`已导入 ${count} 个服务器`)
+  toast.success(`已导入 ${count} 个服务器`)
+}
+
+// 导出配置
+async function handleExportConfig() {
+  try {
+    const filePath = await save({
+      title: '导出配置',
+      defaultPath: 'ssh-forward-config.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (!filePath) return
+
+    const data = store.getConfigData()
+    await exportConfigToPath(filePath, data)
+    toast.success('配置已导出')
+  } catch (e: any) {
+    console.error('导出配置失败:', e)
+    toast.error(`导出失败: ${e?.message || e}`)
+  }
+}
+
+// 选择配置文件并打开导入对话框
+async function handleSelectConfigFile() {
+  try {
+    const filePath = await open({
+      title: '导入配置',
+      multiple: false,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (!filePath) return
+
+    const data = await importConfigFromPath(filePath as string)
+    pendingConfigData.value = data
+    showConfigImport.value = true
+  } catch (e: any) {
+    console.error('读取配置文件失败:', e)
+    toast.error(`读取失败: ${e?.message || e}`)
+  }
+}
+
+// 执行配置导入
+function handleConfigImport(mode: 'merge' | 'replace') {
+  if (!pendingConfigData.value) return
+
+  if (mode === 'merge') {
+    const result = store.mergeConfig(pendingConfigData.value)
+    toast.success(`已合并 ${result.servers} 个服务器和 ${result.rules} 条规则`)
+  } else {
+    store.replaceConfig(pendingConfigData.value)
+    toast.success('配置已覆盖')
+  }
+
+  pendingConfigData.value = null
 }
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="flex flex-col h-screen overflow-hidden bg-white">
     <!-- 顶部栏 -->
-    <header class="app-header">
-      <span class="app-title">SSH 端口转发管理器</span>
-      <el-button
-        size="small"
-        :icon="Upload"
-        @click="showImport = true"
-        title="从 ~/.ssh/config 导入"
-      >
-        导入 SSH Config
-      </el-button>
+    <header class="flex items-center justify-between px-4 h-12 border-b border-gray-200 bg-white flex-shrink-0">
+      <span class="font-semibold text-base text-gray-900">SSH 端口转发管理器</span>
+      <div class="flex gap-2">
+        <button
+          class="btn btn-sm btn-outline gap-1"
+          @click="handleSelectConfigFile"
+          title="导入配置文件"
+        >
+          <FolderOpen class="w-4 h-4" />
+          导入配置
+        </button>
+        <button
+          class="btn btn-sm btn-outline gap-1"
+          @click="handleExportConfig"
+          title="导出配置文件"
+        >
+          <Download class="w-4 h-4" />
+          导出配置
+        </button>
+        <button
+          class="btn btn-sm btn-outline gap-1"
+          @click="showSshImport = true"
+          title="从 SSH config 导入"
+        >
+          <Upload class="w-4 h-4" />
+          导入 SSH Config
+        </button>
+      </div>
     </header>
 
     <!-- 主体 -->
-    <div class="app-body">
+    <div class="flex flex-1 overflow-hidden">
       <!-- 左侧服务器列表 -->
-      <aside class="sidebar">
+      <aside class="w-56 flex-shrink-0 border-r border-gray-200 overflow-hidden flex flex-col">
         <ServerList />
       </aside>
 
       <!-- 右侧转发规则区 -->
-      <main class="main-content">
+      <main class="flex-1 overflow-hidden flex flex-col">
         <ForwardList v-if="selectedServer" :server="selectedServer" />
-        <div v-else class="no-server">
-          <el-empty description="请在左侧选择一个 SSH 服务器" :image-size="100" />
+        <div v-else class="flex-1 flex items-center justify-center">
+          <div class="text-center">
+            <div class="text-6xl mb-4">📋</div>
+            <p class="text-gray-500">请在左侧选择一个 SSH 服务器</p>
+          </div>
         </div>
       </main>
     </div>
 
-    <!-- 导入对话框 -->
-    <ImportSshConfig v-model="showImport" @import="handleImport" />
+    <!-- SSH Config 导入对话框 -->
+    <ImportSshConfig v-model="showSshImport" @import="handleSshImport" />
+
+    <!-- 配置文件导入对话框 -->
+    <ImportConfigDialog
+      v-model="showConfigImport"
+      :config-data="pendingConfigData"
+      @import="handleConfigImport"
+    />
+
+    <!-- Toast 通知 -->
+    <Toast />
   </div>
 </template>
-
-<style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html,
-body,
-#app {
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 14px;
-  background-color: var(--el-bg-color);
-  color: var(--el-text-color-primary);
-}
-</style>
-
-<style scoped>
-.app-layout {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  height: 46px;
-  border-bottom: 1px solid var(--el-border-color);
-  background-color: var(--el-bg-color);
-  flex-shrink: 0;
-}
-
-.app-title {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--el-text-color-primary);
-}
-
-.app-body {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--el-border-color-light);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.main-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.no-server {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-</style>

@@ -1,25 +1,22 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
+import { useServerStore } from './stores/servers'
+import { initToast } from './utils/toast'
+import './style.css'
 
 const app = createApp(App)
 
-// Pinia + localStorage 持久化
+// Pinia
 const pinia = createPinia()
-pinia.use(piniaPluginPersistedstate)
 app.use(pinia)
 
-// Element Plus（中文）
-app.use(ElementPlus, { locale: zhCn })
+// Initialize toast
+initToast(app)
 
-// 注册所有图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
-
+// 挂载应用
 app.mount('#app')
+
+// 启动后从文件加载配置
+const store = useServerStore()
+store.loadFromFile()
