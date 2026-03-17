@@ -20,6 +20,18 @@ fn get_config_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// macOS: 隐藏 Dock 图标（切换为后台 accessory 模式）
+#[cfg(target_os = "macos")]
+fn hide_dock_icon(app: &tauri::AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+/// macOS: 显示 Dock 图标（切换回普通 regular 模式）
+#[cfg(target_os = "macos")]
+fn show_dock_icon(app: &tauri::AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = Arc::new(AppState::new());
@@ -41,7 +53,7 @@ pub fn run() {
         .setup(|app| {
             // 获取应用句柄
             let app_handle = app.handle().clone();
-            
+
             // 创建菜单项
             let show_window_i = MenuItem::with_id(
                 &app_handle,
@@ -50,7 +62,7 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            
+
             let quit_i = MenuItem::with_id(
                 &app_handle,
                 "quit",
@@ -58,23 +70,26 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            
+
             let separator = PredefinedMenuItem::separator(&app_handle)?;
-            
+
             // 创建托盘菜单
             let menu = Menu::with_items(
                 &app_handle,
                 &[&show_window_i, &separator, &quit_i],
             )?;
-            
+
             // 构建托盘图标
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false) // 左键点击不显示菜单，而是切换窗口显示
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&menu);
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+            tray_builder
+                .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
                     let app_handle = tray.app_handle();
-                    
+
                     match event {
                         // 左键点击 - 切换窗口显示/隐藏
                         tauri::tray::TrayIconEvent::Click {
@@ -85,7 +100,11 @@ pub fn run() {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 if window.is_visible().unwrap_or(false) {
                                     let _ = window.hide();
+                                    #[cfg(target_os = "macos")]
+                                    hide_dock_icon(app_handle);
                                 } else {
+                                    #[cfg(target_os = "macos")]
+                                    show_dock_icon(app_handle);
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
@@ -98,6 +117,8 @@ pub fn run() {
                     match event.id().as_ref() {
                         "show_window" => {
                             if let Some(window) = app_handle.get_webview_window("main") {
+                                #[cfg(target_os = "macos")]
+                                show_dock_icon(app_handle);
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -109,7 +130,7 @@ pub fn run() {
                     }
                 })
                 .build(&app_handle)?;
-            
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -117,6 +138,8 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                #[cfg(target_os = "macos")]
+                hide_dock_icon(&window.app_handle().clone());
             }
         })
         .run(tauri::generate_context!())
