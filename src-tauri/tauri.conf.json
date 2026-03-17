@@ -25,14 +25,6 @@
       "csp": null
     }
   },
-  "plugins": {
-    "fs": {
-      "scope": {
-        "allow": ["$APPDATA/**", "$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**"],
-        "deny": []
-      }
-    }
-  },
   "bundle": {
     "active": true,
     "targets": ["dmg", "deb", "appimage", "nsis"],
