@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Commits
+
+Never add `Co-Authored-By` trailers to commit messages.
+
 ## Project Overview
 
 A desktop SSH port forwarding manager built with Tauri v2. The frontend is Vue 3 + TypeScript + DaisyUI/Tailwind CSS 4, and the backend is Rust. Supports password, private key, and SSH agent authentication, as well as jump host chains (ProxyJump).
